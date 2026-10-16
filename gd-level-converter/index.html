@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>GD level converter: .gdlvl ⇄ .gmd</title>
+<style>
+:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);
+--bg:#f3f2f8;--surface:#fff;--ink:#16142b;--muted:#5d5a78;--line:#d6d3e6;--accent:#5b3df5;--accent-ink:#fff;--grid:rgba(91,61,245,.09);--ok:#0b7a4b;--err:#b3261e;color-scheme:light}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0f0e1d;--surface:#18162d;--ink:#ecebfa;--muted:#9a97bb;--line:#2e2b4d;--accent:#8c7bff;--accent-ink:#0f0e1d;--grid:rgba(140,123,255,.10);--ok:#5fd6a0;--err:#ff8a80;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#0f0e1d;--surface:#18162d;--ink:#ecebfa;--muted:#9a97bb;--line:#2e2b4d;--accent:#8c7bff;--accent-ink:#0f0e1d;--grid:rgba(140,123,255,.10);--ok:#5fd6a0;--err:#ff8a80;color-scheme:dark}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:720px;margin:0 auto;padding:40px 20px 56px}
+h1{font-size:clamp(28px,6vw,40px);line-height:1.1;margin:0 0 8px;letter-spacing:-.02em}
+h1 span{color:var(--accent)}
+.sub{color:var(--muted);margin:0 0 28px;max-width:60ch}
+.drop{display:block;border:2px dashed var(--line);border-radius:14px;padding:44px 20px;text-align:center;cursor:pointer;background-color:var(--surface);
+background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);background-size:24px 24px;transition:border-color .15s,background-color .15s}
+.drop:hover,.drop:focus-within,.drop.over{border-color:var(--accent)}
+.drop.over{background-color:var(--bg)}
+.drop strong{display:block;font-size:18px;margin-bottom:4px}
+.drop small{color:var(--muted)}
+.drop input{position:absolute;opacity:0;width:1px;height:1px}
+.pair{display:flex;gap:10px;justify-content:center;align-items:center;margin-top:14px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:14px;color:var(--muted)}
+.pair b{color:var(--ink);font-weight:600;padding:2px 8px;border:1px solid var(--line);border-radius:6px;background:var(--bg)}
+ul{list-style:none;margin:24px 0 0;padding:0;display:grid;gap:12px}
+li{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px;display:flex;gap:14px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+.meta{min-width:0;flex:1 1 240px}
+.names{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:14px;overflow-wrap:anywhere}
+.names i{color:var(--muted);font-style:normal;margin:0 6px}
+.info{color:var(--muted);font-size:14px;margin-top:2px}
+.err{color:var(--err);font-size:14px;margin-top:2px}
+a.btn{background:var(--accent);color:var(--accent-ink);text-decoration:none;font-weight:600;padding:9px 16px;border-radius:9px}
+a.btn:focus-visible,.drop:focus-within{outline:3px solid var(--accent);outline-offset:2px}
+.foot{margin-top:32px;color:var(--muted);font-size:14px}
+.foot p{margin:0 0 6px}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<main>
+  <h1>Geometry Dash level converter <span>.gdlvl ⇄ .gmd</span></h1>
+  <p class="sub">Drop a file and it converts the other way. The level data is copied across untouched, so nothing in the level changes.</p>
+
+  <label class="drop" id="drop">
+    <input type="file" id="file" multiple accept=".gdlvl,.gmd,.txt">
+    <strong>Drop .gdlvl or .gmd files here</strong>
+    <small>or tap to choose files. You can convert several at once.</small>
+    <div class="pair"><b>.gdlvl</b>⇄<b>.gmd</b></div>
+  </label>
+
+  <ul id="list" aria-live="polite"></ul>
+
+  <div class="foot">
+    <p>Everything runs in your browser. Your files are never uploaded.</p>
+    <p>.gdlvl is a gzip + base64 wrapper around the level plist. .gmd is that plist as plain XML.</p>
+  </div>
+</main>
+
+<script>
+const $ = s => document.querySelector(s);
+const enc = new TextEncoder(), dec = new TextDecoder();
+
+async function gzip(bytes, mode) {
+  const s = new (mode === 'c' ? CompressionStream : DecompressionStream)('gzip');
+  const w = s.writable.getWriter(); w.write(bytes); w.close();
+  return new Uint8Array(await new Response(s.readable).arrayBuffer());
+}
+function b64uDecode(str) {
+  str = str.trim().replace(/-/g, '+').replace(/_/g, '/');
+  str += '='.repeat((4 - str.length % 4) % 4);
+  const bin = atob(str), u = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+  return u;
+}
+function b64uEncode(u) {
+  let s = '';
+  for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000));
+  return btoa(s).replace(/\+/g, '-').replace(/\//g, '_');
+}
+
+async function gdlvlToGmd(text) {
+  let bytes;
+  try { bytes = b64uDecode(text); } catch { throw new Error('Not valid base64. This does not look like a .gdlvl file.'); }
+  if (bytes[0] !== 0x1f || bytes[1] !== 0x8b) throw new Error('The data is not gzip-compressed, so it is not a .gdlvl file.');
+  const plist = dec.decode(await gzip(bytes, 'd'));
+  const i = plist.indexOf('<dict>'), j = plist.lastIndexOf('</dict>');
+  if (i < 0 || j < 0) throw new Error('Decoded data has no level plist inside.');
+  return '<d>' + plist.slice(i + 6, j) + '</d>';
+}
+async function gmdToGdlvl(text) {
+  const m = text.match(/^\s*(?:<\?xml[^>]*\?>\s*)?<d>([\s\S]*)<\/d>\s*$/);
+  if (!m) throw new Error('Not a .gmd file. Expected XML starting with <d>.');
+  const plist = '<?xml version="1.0"?><plist version="1.0" gjver="2.0"><dict>' + m[1] + '</dict></plist>';
+  return b64uEncode(await gzip(enc.encode(plist), 'c'));
+}
+
+async function describe(xml) {
+  const name = (xml.match(/<k>k2<\/k><s>([\s\S]*?)<\/s>/) || [])[1] || 'Unnamed level';
+  let objects = null;
+  try {
+    const k4 = (xml.match(/<k>k4<\/k><s>([\s\S]*?)<\/s>/) || [])[1];
+    if (k4) {
+      const lvl = dec.decode(await gzip(b64uDecode(k4), 'd'));
+      objects = lvl.split(';').filter(Boolean).length - 1;
+    }
+  } catch {}
+  return name + (objects != null ? ' · ' + objects.toLocaleString() + ' objects' : '');
+}
+
+function fmt(n) { return n > 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB'; }
+
+async function convert(file) {
+  const li = document.createElement('li');
+  const stem = file.name.replace(/\.[^.]+$/, '');
+  li.innerHTML = '<div class="meta"><div class="names"></div><div class="info">Converting…</div></div>';
+  $('#list').prepend(li);
+  const names = li.querySelector('.names'), info = li.querySelector('.info');
+  try {
+    const text = await file.text();
+    const isGmd = /^\s*(<\?xml[^>]*\?>\s*)?<d>/.test(text);
+    let out, outName, xml;
+    if (isGmd) { out = await gmdToGdlvl(text); outName = stem + '.gdlvl'; xml = text; }
+    else { out = await gdlvlToGmd(text); outName = stem + '.gmd'; xml = out; }
+    names.innerHTML = '';
+    names.append(file.name);
+    const arrow = document.createElement('i'); arrow.textContent = '→'; names.append(arrow, outName);
+    info.textContent = (await describe(xml)) + ' · ' + fmt(out.length);
+    const a = document.createElement('a');
+    a.className = 'btn'; a.textContent = 'Download ' + outName; a.download = outName;
+    a.href = URL.createObjectURL(new Blob([out], { type: 'application/octet-stream' }));
+    li.append(a);
+  } catch (e) {
+    names.textContent = file.name;
+    info.className = 'err';
+    info.textContent = e.message + ' Check that the file is an unedited .gdlvl or .gmd export.';
+  }
+}
+
+function handle(files) { [...files].forEach(convert); }
+$('#file').addEventListener('change', e => { handle(e.target.files); e.target.value = ''; });
+const drop = $('#drop');
+['dragenter', 'dragover'].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.add('over'); }));
+['dragleave', 'drop'].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.remove('over'); }));
+drop.addEventListener('drop', e => handle(e.dataTransfer.files));
+</script>
+</body>
+</html>
